@@ -1,4 +1,6 @@
-/// Local dummy data for the Admin Panel. Replace with a backend later.
+/// Local dummy data for the Admin Panel.
+/// Replace with a backend later.
+
 class AdminData {
   // Available blood groups
   static const List<String> bloodGroups = [
@@ -12,65 +14,68 @@ class AdminData {
     'O-',
   ];
 
-  // Donor data
+  // ---------------------------------------------------------
+  // DONORS
+  // ---------------------------------------------------------
+
   static final List<Map<String, dynamic>> donors = [
     {
       'id': 1,
       'name': 'Pratik Nakum',
       'location': 'Raiya Road, Rajkot',
       'bloodType': 'AB+',
+      'eligibility': 'Ready',
+      'lastDonation': 'January 14, 2026',
+      'totalDonations': '3 Times',
     },
     {
       'id': 2,
-      'name': 'Pratik Nakum',
-      'location': 'Rajya Road, Rajkot',
-      'bloodType': 'O+',
-    },
-    {
-      'id': 3,
-      'name': 'Pratik Nakum',
-      'location': 'Raiya Road, Rajkot',
-      'bloodType': 'AB+',
-    },
-    {
-      'id': 4,
       'name': 'Karan Patel',
       'location': 'Kalawad Road, Rajkot',
       'bloodType': 'O+',
+      'eligibility': 'Ready',
+      'lastDonation': 'December 20, 2025',
+      'totalDonations': '5 Times',
     },
     {
-      'id': 5,
+      'id': 3,
       'name': 'Neha Shah',
       'location': 'University Road, Rajkot',
       'bloodType': 'B+',
+      'eligibility': 'Not Ready',
+      'lastDonation': 'February 05, 2026',
+      'totalDonations': '2 Times',
     },
     {
-      'id': 6,
+      'id': 4,
       'name': 'Amit Joshi',
       'location': 'Yagnik Road, Rajkot',
       'bloodType': 'A+',
+      'eligibility': 'Ready',
+      'lastDonation': 'January 25, 2026',
+      'totalDonations': '4 Times',
     },
     {
-      'id': 7,
+      'id': 5,
       'name': 'Riya Mehta',
       'location': 'Mavdi, Rajkot',
-      'bloodType': 'AB+',
-    },
-    {
-      'id': 8,
-      'name': 'Harsh Desai',
-      'location': 'Gondal Road, Rajkot',
-      'bloodType': 'O+',
+      'bloodType': 'AB-',
+      'eligibility': 'Ready',
+      'lastDonation': 'November 18, 2025',
+      'totalDonations': '2 Times',
     },
   ];
 
-  // Blood request data
+  // ---------------------------------------------------------
+  // BLOOD REQUESTS
+  // ---------------------------------------------------------
+
   static final List<Map<String, dynamic>> requests = [
     {
       'id': 1,
       'status': 'Normal',
       'hospital': 'Civil Hospital',
-      'location': 'Hospital chowk, Rajkot',
+      'location': 'Hospital Chowk, Rajkot',
       'patient': 'Pratik Nakum',
       'bloodType': 'AB+',
       'units': '3 Units',
@@ -78,52 +83,54 @@ class AdminData {
     },
     {
       'id': 2,
-      'status': 'Critical',
+      'status': 'Urgent',
       'hospital': 'Civil Hospital',
-      'location': 'Hospital chowk, Rajkot',
-      'patient': 'Pratik Nakum',
-      'bloodType': 'AB+',
-      'units': '3 Units',
+      'location': 'Hospital Chowk, Rajkot',
+      'patient': 'Neha Shah',
+      'bloodType': 'B+',
+      'units': '2 Units',
       'decision': 'pending',
     },
     {
       'id': 3,
       'status': 'Critical',
-      'hospital': 'Civil Hospital',
-      'location': 'Hospital chowk, Rajkot',
-      'patient': 'Pratik Nakum',
-      'bloodType': 'AB+',
-      'units': '3 Units',
+      'hospital': 'Rajkot Cancer Hospital',
+      'location': 'Kalawad Road, Rajkot',
+      'patient': 'Karan Patel',
+      'bloodType': 'O+',
+      'units': '4 Units',
       'decision': 'pending',
     },
     {
       'id': 4,
-      'status': 'Urgent',
-      'hospital': 'Rajkot Cancer Hospital',
-      'location': 'Kalawad Road, Rajkot',
-      'patient': 'Neha Shah',
-      'bloodType': 'B+',
+      'status': 'Normal',
+      'hospital': 'H.J. Doshi Hospital',
+      'location': 'University Road, Rajkot',
+      'patient': 'Amit Joshi',
+      'bloodType': 'A+',
       'units': '1 Unit',
       'decision': 'pending',
     },
     {
       'id': 5,
       'status': 'Critical',
-      'hospital': 'H.J. Doshi Hospital',
-      'location': 'University Road, Rajkot',
-      'patient': 'Karan Patel',
-      'bloodType': 'O+',
-      'units': '2 Units',
+      'hospital': 'Civil Hospital',
+      'location': 'Hospital Chowk, Rajkot',
+      'patient': 'Riya Mehta',
+      'bloodType': 'AB-',
+      'units': '3 Units',
       'decision': 'pending',
     },
   ];
 
-  // System alerts
+  // ---------------------------------------------------------
+  // SYSTEM ALERTS
+  // ---------------------------------------------------------
+
   static final List<Map<String, dynamic>> alerts = [
     {
       'id': 1,
       'badge': 'Normal',
-      'urgency': 'Normal',
       'time': '15m ago',
       'title': 'NORMAL: NEW B+ REQUEST',
       'description':
@@ -132,84 +139,107 @@ class AdminData {
     {
       'id': 2,
       'badge': 'Urgent',
-      'urgency': 'Urgent',
-      'time': '15m ago',
-      'title': 'URGENT: NEW B+ REQUEST',
+      'time': '20m ago',
+      'title': 'URGENT: NEW O+ REQUEST',
       'description':
-          'Rajkot Cancer Hospital requires approval for a 1-unit B+ Urgent request.',
+          'Civil Hospital requires approval for a 2-unit O+ urgent request.',
     },
     {
       'id': 3,
       'badge': 'Critical',
-      'urgency': 'Critical',
-      'time': '15m ago',
-      'title': 'CRITICAL: NEW AB+ REQUEST',
+      'time': '25m ago',
+      'title': 'CRITICAL: NEW AB- REQUEST',
       'description':
-          'Civil Hospital requires immediate approval for a 3-unit AB+ Critical request.',
+          'Rajkot Cancer Hospital requires immediate approval for a 3-unit AB- critical request.',
     },
     {
       'id': 4,
       'badge': 'Normal',
-      'urgency': 'Normal',
       'time': '32m ago',
       'title': 'NORMAL: NEW AB+ REQUEST',
       'description':
-          'Civil Hospital requires approval for a 3-unit AB+ Normal request.',
+          'Civil Hospital requires approval for a 3-unit AB+ normal request.',
     },
     {
       'id': 5,
       'badge': 'Critical',
-      'urgency': 'Critical',
       'time': '1h ago',
-      'title': 'CRITICAL: NEW O+ REQUEST',
+      'title': 'CRITICAL: NEW A+ REQUEST',
       'description':
-          'H.J. Doshi Hospital requires immediate approval for a 2-unit O+ Critical request.',
+          'H.J. Doshi Hospital requires immediate approval for a 4-unit A+ critical request.',
     },
   ];
 
-  // Users
+  // ---------------------------------------------------------
+  // USERS
+  // ---------------------------------------------------------
+
   static final List<Map<String, dynamic>> users = [
     {
       'id': 1,
       'name': 'Pratik Nakum',
-      'email': 'Example@gmail.com',
+      'email': 'pratik@gmail.com',
+      'bloodGroup': 'AB+',
       'role': 'AB+ Donor',
+
+      // Donation details
+      'lastDonation': 'January 14, 2026',
+      'totalDonations': '3 Times',
+      'donationUnits': 2.5,
+      'donationDate': 'January 14, 2026',
+      'donationHospital': 'Civil Hospital',
     },
     {
       'id': 2,
-      'name': 'Pratik Nakum',
-      'email': 'Example@gmail.com',
-      'role': 'AB+ Donor',
+      'name': 'Karan Patel',
+      'email': 'karan@gmail.com',
+      'bloodGroup': 'O+',
+      'role': 'O+ Donor',
+
+      'lastDonation': 'December 20, 2025',
+      'totalDonations': '5 Times',
+      'donationUnits': 2.0,
+      'donationDate': 'December 20, 2025',
+      'donationHospital': 'H.J. Doshi Hospital',
     },
     {
       'id': 3,
-      'name': 'Pratik Nakum',
-      'email': 'Example@gmail.com',
-      'role': 'AB+ Donor',
+      'name': 'Neha Shah',
+      'email': 'neha@gmail.com',
+      'bloodGroup': 'B+',
+      'role': 'B+ Donor',
+
+      'lastDonation': 'February 05, 2026',
+      'totalDonations': '2 Times',
+      'donationUnits': 2.5,
+      'donationDate': 'February 05, 2026',
+      'donationHospital': 'Rajkot Cancer Hospital',
     },
     {
       'id': 4,
-      'name': 'Pratik Nakum',
-      'email': 'Example@gmail.com',
-      'role': 'AB+ Donor',
+      'name': 'Amit Joshi',
+      'email': 'amit@gmail.com',
+      'bloodGroup': 'A+',
+      'role': 'A+ Donor',
+
+      'lastDonation': 'January 25, 2026',
+      'totalDonations': '4 Times',
+      'donationUnits': 2.0,
+      'donationDate': 'January 25, 2026',
+      'donationHospital': 'Civil Hospital',
     },
     {
       'id': 5,
-      'name': 'Pratik Nakum',
-      'email': 'Example@gmail.com',
-      'role': 'AB+ Donor',
-    },
-    {
-      'id': 6,
-      'name': 'Neha Shah',
-      'email': 'neha@gmail.com',
-      'role': 'B+ Donor',
-    },
-    {
-      'id': 7,
-      'name': 'Karan Patel',
-      'email': 'karan@gmail.com',
-      'role': 'O+ Donor',
+      'name': 'Riya Mehta',
+      'email': 'riya@gmail.com',
+      'bloodGroup': 'AB-',
+      'role': 'AB- Donor',
+
+      'lastDonation': 'November 18, 2025',
+      'totalDonations': '2 Times',
+      'donationUnits': 2.5,
+      'donationDate': 'November 18, 2025',
+      'donationHospital': 'Civil Hospital',
     },
   ];
 }
