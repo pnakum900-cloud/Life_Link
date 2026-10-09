@@ -4,7 +4,7 @@ import '../Bokul/profile.dart';
 import '../Bokul/request.dart';
 import '../Bokul/search.dart';
 import '../Bokul/user_nav.dart';
-import 'register_screen.dart';
+// import 'register_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
