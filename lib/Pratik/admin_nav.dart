@@ -35,7 +35,7 @@ class AdminNav {
   }
 
   static void logout(BuildContext context) {
-    // TODO: Replace this with real logout logic later
+    
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (context) => const AdminLogin()),
