@@ -1,0 +1,570 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================
+    // HELPER FUNCTIONS
+    // =========================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Email verification check on Auth ID token claim
+    function isEmailVerified() {
+      return isAuthenticated() &&
+        request.auth.token.get('email_verified', false) == true;
+    }
+
+    // Reliable admin helper checking token custom claims or authoritative document.
+    // Uses .get('key', default) to prevent CEL runtime exceptions on standard tokens.
+    function isAdmin() {
+      return isAuthenticated() && (
+        (request.auth.token.get('role', '') == 'admin' || request.auth.token.get('admin', false) == true) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin')
+      );
+    }
+
+    function isValidEmailDomain(email) {
+      return email.matches('^[a-zA-Z0-9._%+-]+@gmail\\.com$') ||
+             email.matches('^[a-zA-Z0-9._%+-]+@rku\\.ac\\.in$');
+    }
+
+    // Safe participant verification in a blood request.
+    // Uses data.get('field', '') to prevent CEL runtime errors when fields are absent.
+    function isParticipantInRequest(reqId, userId) {
+      return exists(/databases/$(database)/documents/blood_requests/$(reqId)) && (
+        get(/databases/$(database)/documents/blood_requests/$(reqId)).data.get('requesterId', '') == userId ||
+        get(/databases/$(database)/documents/blood_requests/$(reqId)).data.get('donorId', '') == userId ||
+        getAfter(/databases/$(database)/documents/blood_requests/$(reqId)).data.get('requesterId', '') == userId ||
+        getAfter(/databases/$(database)/documents/blood_requests/$(reqId)).data.get('donorId', '') == userId ||
+        getAfter(/databases/$(database)/documents/blood_requests/$(reqId)).data.get('lastReleasedDonorId', '') == userId ||
+        getAfter(/databases/$(database)/documents/blood_requests/$(reqId)).data.get('lastNotCompletedDonorId', '') == userId
+      );
+    }
+
+    // =========================================================
+    // COLLECTION: users
+    // Private user profiles (stores private phone number, email, and credentials)
+    // Protected to owner and authorized administrators only.
+    // =========================================================
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
+
+      // Public registration requires a verified email before active profile creation.
+      // Rejects creation if document already exists with deleted tombstone.
+      allow create: if isOwner(userId) &&
+        isEmailVerified() &&
+        isValidEmailDomain(request.resource.data.email) &&
+        request.resource.data.role == 'user' &&
+        (!('accountStatus' in request.resource.data) || request.resource.data.accountStatus == 'active') &&
+        (!exists(/databases/$(database)/documents/users/$(userId)) ||
+         get(/databases/$(database)/documents/users/$(userId)).data.get('accountStatus', '') != 'deleted');
+
+      // Regular user cannot escalate role, change accountStatus, or alter email/uid.
+      // Deleted accounts cannot be updated by user.
+      // Admin update is field-limited: cannot modify role, email, or uid.
+      allow update: if isAuthenticated() && (
+        (isOwner(userId) &&
+         isEmailVerified() &&
+         resource.data.get('accountStatus', 'active') != 'deleted' &&
+         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'accountStatus', 'email', 'uid'])) ||
+        (isAdmin() && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'email', 'uid']))
+      );
+
+      // Admin cascade deletion permitted
+      allow delete: if isAdmin();
+    }
+
+    // =========================================================
+    // COLLECTION: profile_photos
+    // Zero-billing isolated storage (Base64 dataURI, <= 400 KiB)
+    // =========================================================
+    match /profile_photos/{userId} {
+      allow read: if isAuthenticated();
+
+      allow create, update: if isOwner(userId) &&
+        request.resource.data.photoData is string &&
+        request.resource.data.photoData.size() <= 410000 &&
+        request.resource.data.sizeBytes is int &&
+        request.resource.data.sizeBytes <= 307200;
+
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    // =========================================================
+    // COLLECTION: donor_profiles
+    // Public directory for donor search.
+    // Private contact details (street address, phone number) are protected
+    // in users/{userId} and only shared with the requester upon mutual request acceptance.
+    // - Regular users CANNOT change their blood group after registration.
+    // - Administrators CAN correct blood group to a clinical type.
+    // - Totals/units/lastDonationAt are strictly protected from both
+    //   users and direct admin edits, only incrementing through
+    //   atomic 3-way verification bound to a real verified donation and fulfilled request.
+    // =========================================================
+    match /donor_profiles/{userId} {
+      allow read: if isAuthenticated();
+
+      allow create: if isOwner(userId) &&
+        isEmailVerified() && (
+        (!('totalDonationCount' in request.resource.data) || request.resource.data.totalDonationCount == 0) &&
+        (!('totalUnitsDonated' in request.resource.data) || request.resource.data.totalUnitsDonated == 0) &&
+        (!('lastDonationAt' in request.resource.data) || request.resource.data.lastDonationAt == null) &&
+        (!('lastVerifiedDonationId' in request.resource.data) || request.resource.data.lastVerifiedDonationId == null) &&
+        request.resource.data.role == 'user'
+      );
+
+      allow update: if isAuthenticated() && (
+        // Branch 1: Profile owner updating personal/availability details.
+        // Protected metrics (totals, units, last donation, role) AND bloodGroup are strictly prohibited.
+        (isOwner(userId) &&
+          isEmailVerified() &&
+          resource.data.get('accountStatus', 'active') != 'deleted' &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'bloodGroup',
+            'totalDonationCount', 'totalUnitsDonated', 'lastDonationAt',
+            'lastVerifiedDonationId', 'role', 'userId', 'accountStatus'
+          ])) ||
+
+        // Branch 2: Administrator profile corrections.
+        // Admin MAY change bloodGroup (validated to clinical types), but CANNOT directly edit totals or role.
+        (isAdmin() &&
+          (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['bloodGroup']) ||
+           request.resource.data.bloodGroup in ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']) &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'totalDonationCount', 'totalUnitsDonated', 'lastDonationAt',
+            'lastVerifiedDonationId', 'role', 'userId'
+          ])) ||
+
+        // Branch 3: Atomic 3-way verified donation transaction.
+        // Strictly bound to verified donation AND fulfilled request!
+        (isAdmin() &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'totalDonationCount', 'totalUnitsDonated', 'lastDonationAt', 'lastVerifiedDonationId',
+            'eligibilityStatus', 'isAvailable', 'updatedAt'
+          ]) &&
+          request.resource.data.lastVerifiedDonationId is string &&
+          request.resource.data.lastVerifiedDonationId.size() > 0 &&
+          (!('lastVerifiedDonationId' in resource.data) ||
+           resource.data.lastVerifiedDonationId != request.resource.data.lastVerifiedDonationId) &&
+          // Verify donation document state
+          getAfter(/databases/$(database)/documents/donations/$(request.resource.data.lastVerifiedDonationId)).data.status == 'verified' &&
+          getAfter(/databases/$(database)/documents/donations/$(request.resource.data.lastVerifiedDonationId)).data.donorId == userId &&
+          get(/databases/$(database)/documents/donations/$(request.resource.data.lastVerifiedDonationId)).data.status != 'verified' &&
+          // Verify linked blood request fulfilled state
+          getAfter(/databases/$(database)/documents/blood_requests/$(getAfter(/databases/$(database)/documents/donations/$(request.resource.data.lastVerifiedDonationId)).data.bloodRequestId)).data.status == 'fulfilled' &&
+          getAfter(/databases/$(database)/documents/blood_requests/$(getAfter(/databases/$(database)/documents/donations/$(request.resource.data.lastVerifiedDonationId)).data.bloodRequestId)).data.donationStatus == 'verified' &&
+          // Verify metric increments
+          request.resource.data.totalDonationCount == resource.data.get('totalDonationCount', 0) + 1 &&
+          request.resource.data.totalUnitsDonated == resource.data.get('totalUnitsDonated', 0) +
+            getAfter(/databases/$(database)/documents/donations/$(request.resource.data.lastVerifiedDonationId)).data.unitsDonated)
+      );
+
+      // Admin cascade deletion permitted
+      allow delete: if isAdmin();
+
+      // Dedicated protected subcollection for private donor contact details
+      match /private_contact/{docId} {
+        allow read, write: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      }
+    }
+
+    // =========================================================
+    // COLLECTION: blood_requests
+    // Strict lifecycle: pending -> approved/rejected/republished
+    // Atomic single-donor assignment & requester-exclusive lifecycle actions
+    // =========================================================
+    match /blood_requests/{requestId} {
+      allow read: if isAuthenticated() && (
+        (resource != null && (
+          resource.data.visibility == 'published' ||
+          resource.data.requesterId == request.auth.uid ||
+          resource.data.get('donorId', '') == request.auth.uid
+        )) ||
+        isAdmin()
+      );
+
+      allow create: if isAuthenticated() && (
+        (request.resource.data.requesterId == request.auth.uid &&
+         isEmailVerified() &&
+         request.resource.data.status == 'pending' &&
+         request.resource.data.visibility == 'private') ||
+        isAdmin()
+      );
+
+      allow update: if isAuthenticated() && (
+        // =======================================================
+        // BRANCH 1: Requester Lifecycle Actions (EVALUATED FIRST)
+        // Strictly exclusive to authentic original requester.
+        // Donors and non-owner administrators are strictly DENIED.
+        // =======================================================
+        (resource.data.requesterId == request.auth.uid && isEmailVerified() && (
+          // Action 1A: Confirm Done -> pending_verification
+          (resource.data.status == 'approved' &&
+           resource.data.get('donorId', '') != '' &&
+           resource.data.get('donationStatus', '') == 'donor_accepted' &&
+           request.resource.data.donationStatus == 'pending_verification' &&
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+             'donationStatus', 'confirmedUnits', 'confirmedAt', 'completionNotes', 'updatedAt'
+           ])) ||
+
+          // Action 1B: Donation Did Not Happen -> reset to waiting_donor
+          (resource.data.status == 'approved' &&
+           resource.data.get('donorId', '') != '' &&
+           resource.data.get('donationStatus', '') == 'donor_accepted' &&
+           request.resource.data.status == 'approved' &&
+           request.resource.data.visibility == 'published' &&
+           (!('donorId' in request.resource.data) || request.resource.data.donorId == null || request.resource.data.donorId == '') &&
+           request.resource.data.donationStatus == 'waiting_donor' &&
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+             'status', 'visibility',
+             'donorId', 'donorName', 'donorPhone', 'donorBloodGroup', 'donorPhotoUrl',
+             'donorCity', 'acceptedAt', 'donationStatus', 'confirmedUnits', 'confirmedAt',
+             'completionNotes', 'notCompletedReason', 'notCompletedAt',
+             'lastReleasedDonorId', 'lastReleasedDonorName', 'lastReleasedReason', 'lastReleasedAt',
+             'lastNotCompletedDonorId', 'lastNotCompletedDonorName', 'lastNotCompletedReason', 'lastNotCompletedAt',
+             'lastUnsuccessfulAttempt', 'unsuccessfulAttemptReason',
+             'reopenedAt', 'feedUpdatedAt', 'updatedAt'
+           ])) ||
+
+          // Action 1C: Release Donor -> reset to waiting_donor
+          (resource.data.status == 'approved' &&
+           resource.data.get('donorId', '') != '' &&
+           resource.data.get('donationStatus', '') == 'donor_accepted' &&
+           request.resource.data.status == 'approved' &&
+           request.resource.data.visibility == 'published' &&
+           (!('donorId' in request.resource.data) || request.resource.data.donorId == null || request.resource.data.donorId == '') &&
+           request.resource.data.donationStatus == 'waiting_donor' &&
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+             'status', 'visibility',
+             'donorId', 'donorName', 'donorPhone', 'donorBloodGroup', 'donorPhotoUrl',
+             'donorCity', 'acceptedAt', 'donationStatus', 'confirmedUnits', 'confirmedAt',
+             'completionNotes', 'notCompletedReason', 'notCompletedAt',
+             'lastReleasedDonorId', 'lastReleasedDonorName', 'lastReleasedReason', 'lastReleasedAt',
+             'reopenedAt', 'feedUpdatedAt', 'updatedAt'
+           ])) ||
+
+          // Action 1D: Requester Cancellation
+          (resource.data.donationStatus != 'verified' &&
+           request.resource.data.status == 'cancelled' &&
+           request.resource.data.visibility == 'private' &&
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'visibility', 'updatedAt'])) ||
+
+          // Action 1E: Requester editing general details while pending review
+          (resource.data.status == 'pending' &&
+           !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+             'status', 'visibility', 'requesterId', 'donorId', 'adminDecisionBy', 'adminDecisionAt'
+           ]))
+        )) ||
+
+        // =======================================================
+        // BRANCH 2: Donor Acceptance (EVALUATED SECOND)
+        // Strictly assigns one eligible regular donor.
+        // =======================================================
+        (request.auth.uid != resource.data.requesterId &&
+         isEmailVerified() &&
+         resource.data.status == 'approved' &&
+         resource.data.visibility == 'published' &&
+         (!('donorId' in resource.data) || resource.data.donorId == null || resource.data.donorId == '') &&
+         request.resource.data.donorId == request.auth.uid &&
+         request.resource.data.donationStatus == 'donor_accepted' &&
+         exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'user') == 'user' &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('accountStatus', 'active') == 'active' &&
+         exists(/databases/$(database)/documents/donor_profiles/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/donor_profiles/$(request.auth.uid)).data.get('isAvailable', true) == true &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+           'donorId', 'donorName', 'donorPhone', 'donorBloodGroup', 'donorPhotoUrl',
+           'donorCity', 'acceptedAt', 'donationStatus', 'updatedAt'
+         ])) ||
+
+        // =======================================================
+        // BRANCH 3: Explicit Separate Administrator Actions
+        // NO generic hasAny() bypass! Each admin operation is distinct.
+        // =======================================================
+        (isAdmin() && (
+          // Admin Action 3A: Review Approval
+          (resource.data.status == 'pending' &&
+           request.resource.data.status == 'approved' &&
+           request.resource.data.visibility == 'published' &&
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+             'status', 'visibility', 'adminDecisionBy', 'adminDecisionAt', 'adminNotes', 'feedUpdatedAt', 'updatedAt'
+           ])) ||
+
+          // Admin Action 3B: Review Rejection
+          (resource.data.status == 'pending' &&
+           request.resource.data.status == 'rejected' &&
+           request.resource.data.visibility == 'private' &&
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+             'status', 'visibility', 'adminDecisionBy', 'adminDecisionAt', 'adminNotes', 'rejectionReason', 'updatedAt'
+           ])) ||
+
+          // Admin Action 3C: Republishing
+          (resource.data.status == 'rejected' &&
+           request.resource.data.status == 'approved' &&
+           request.resource.data.visibility == 'published' &&
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+             'status', 'visibility', 'adminDecisionBy', 'adminDecisionAt', 'adminNotes', 'republishedAt', 'isRepublished', 'feedUpdatedAt', 'updatedAt'
+           ])) ||
+
+          // Admin Action 3D: Atomic 3-way Donation Verification Reflection
+          (resource.data.status == 'approved' &&
+           resource.data.donationStatus == 'pending_verification' &&
+           request.resource.data.status == 'fulfilled' &&
+           request.resource.data.donationStatus == 'verified' &&
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+             'status', 'donationStatus', 'completedAt', 'adminDecisionBy', 'adminDecisionAt', 'adminNotes', 'updatedAt'
+           ]) &&
+           exists(/databases/$(database)/documents/donations/$( 'donation_' + requestId )) &&
+           getAfter(/databases/$(database)/documents/donations/$( 'donation_' + requestId )).data.status == 'verified' &&
+           getAfter(/databases/$(database)/documents/donor_profiles/$(resource.data.donorId)).data.lastVerifiedDonationId == ('donation_' + requestId)) ||
+
+          // Admin Action 3E: Admin rejects the pending donation attempt.
+          // The application records donation_rejected, then lets the admin
+          // explicitly reopen or close the request in a separate action.
+          (resource.data.status == 'approved' &&
+           resource.data.donationStatus == 'pending_verification' &&
+           request.resource.data.status == 'approved' &&
+           request.resource.data.donationStatus == 'donation_rejected' &&
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+             'donationStatus', 'adminNotes', 'rejectionReason', 'updatedAt'
+           ])) ||
+
+          // Admin Action 3F: Cascade Deletion Reopen (when assigned donor account is purged)
+          (resource.data.status == 'approved' &&
+           resource.data.donationStatus != 'verified' &&
+           (!('donorId' in request.resource.data) || request.resource.data.donorId == null || request.resource.data.donorId == '') &&
+           request.resource.data.donationStatus == 'waiting_donor' &&
+           request.resource.data.status == 'approved' &&
+           request.resource.data.visibility == 'published' &&
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+             'status', 'visibility',
+             'donorId', 'donorName', 'donorPhone', 'donorBloodGroup', 'donorPhotoUrl', 'donorCity', 'acceptedAt',
+             'donationStatus', 'lastReleasedReason', 'lastReleasedAt', 'reopenedAt', 'feedUpdatedAt', 'updatedAt'
+           ])) ||
+
+          // Admin Action 3G: Historical Anonymization upon Requester Deletion
+          (resource.data.donationStatus == 'verified' &&
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+             'requesterName', 'contactPhone', 'contactNumber', 'donorName', 'donorPhone', 'updatedAt'
+           ])) ||
+
+          // Admin Action 3H: Administrative Notes Audit Update
+          (request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'adminNotes', 'rejectionReason', 'updatedAt'
+          ])) ||
+
+          // Admin Action 3I: Close a request after its donation was rejected.
+          (resource.data.status == 'approved' &&
+           resource.data.donationStatus == 'donation_rejected' &&
+           request.resource.data.status == 'cancelled' &&
+           request.resource.data.visibility == 'private' &&
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+             'status', 'visibility', 'updatedAt'
+           ]))
+        ))
+      );
+
+      // Admin cascade deletion permitted
+      allow delete: if isAdmin();
+    }
+
+    // =========================================================
+    // COLLECTION: donations
+    // Deterministic creation by requester, verified by admin.
+    // Core details (units, identities, request link) are IMMUTABLE.
+    // Supports admin anonymization upon requester deletion.
+    // =========================================================
+    match /donations/{donationId} {
+      allow read: if isAuthenticated() && (
+        (resource != null && (
+          resource.data.donorId == request.auth.uid ||
+          resource.data.requesterId == request.auth.uid
+        )) ||
+        isAdmin()
+      );
+
+      // Deterministic ID: 'donation_' + bloodRequestId
+      // Validated against the real blood request in the same atomic transaction/batch
+      allow create: if isAuthenticated() && (
+        (request.resource.data.requesterId == request.auth.uid &&
+         isEmailVerified() &&
+         request.resource.data.donorId != request.auth.uid &&
+         donationId == 'donation_' + request.resource.data.bloodRequestId &&
+         request.resource.data.status == 'pending_verification' &&
+         request.resource.data.unitsDonated is number &&
+         request.resource.data.unitsDonated > 0 &&
+         request.resource.data.unitsDonated <= 10 &&
+         exists(/databases/$(database)/documents/blood_requests/$(request.resource.data.bloodRequestId)) &&
+         getAfter(/databases/$(database)/documents/blood_requests/$(request.resource.data.bloodRequestId)).data.requesterId == request.auth.uid &&
+         getAfter(/databases/$(database)/documents/blood_requests/$(request.resource.data.bloodRequestId)).data.donorId == request.resource.data.donorId &&
+         getAfter(/databases/$(database)/documents/blood_requests/$(request.resource.data.bloodRequestId)).data.donationStatus == 'pending_verification')
+      );
+
+      // Only administrators can verify, reject, or anonymize donation records.
+      allow update: if isAdmin() && (
+        // Branch 1: Atomic 3-way verification of pending donation
+        (resource.data.status == 'pending_verification' &&
+         request.resource.data.status == 'verified' &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+           'status', 'verifiedBy', 'verifiedAt', 'adminNotes', 'updatedAt'
+         ]) &&
+         // Verify linked blood request transitions to fulfilled in the same transaction
+         getAfter(/databases/$(database)/documents/blood_requests/$(resource.data.bloodRequestId)).data.status == 'fulfilled' &&
+         getAfter(/databases/$(database)/documents/blood_requests/$(resource.data.bloodRequestId)).data.donationStatus == 'verified' &&
+         // Verify donor aggregate updates in the same transaction
+         getAfter(/databases/$(database)/documents/donor_profiles/$(resource.data.donorId)).data.lastVerifiedDonationId == donationId &&
+         getAfter(/databases/$(database)/documents/donor_profiles/$(resource.data.donorId)).data.totalDonationCount ==
+           get(/databases/$(database)/documents/donor_profiles/$(resource.data.donorId)).data.get('totalDonationCount', 0) + 1 &&
+         getAfter(/databases/$(database)/documents/donor_profiles/$(resource.data.donorId)).data.totalUnitsDonated ==
+           get(/databases/$(database)/documents/donor_profiles/$(resource.data.donorId)).data.get('totalUnitsDonated', 0) + resource.data.unitsDonated) ||
+
+        // Branch 2: Administrative rejection of pending donation
+        (resource.data.status == 'pending_verification' &&
+         request.resource.data.status == 'rejected' &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+           'status', 'verifiedBy', 'verifiedAt', 'rejectionReason', 'adminNotes', 'updatedAt'
+         ])) ||
+
+        // Branch 3: Admin privacy anonymization for surviving donor records upon requester deletion
+        (resource.data.status == 'verified' &&
+         request.resource.data.status == 'verified' &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+           'requesterName', 'patientName', 'anonymizedAt', 'updatedAt'
+         ]) &&
+         !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+           'unitsDonated', 'donorId', 'requesterId', 'bloodRequestId', 'bloodGroup'
+         ]))
+      );
+
+      // Admin cascade deletion permitted (e.g. unverified/cancelled records)
+      allow delete: if isAdmin();
+    }
+
+    // =========================================================
+    // COLLECTION: notifications
+    // Recipient anti-spoofing and event-type verification:
+    // Creation allowed only for verified participants on genuine events.
+    // =========================================================
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && (
+        (resource != null && resource.data.userId == request.auth.uid) ||
+        isAdmin()
+      );
+
+      // Recipients can only toggle 'isRead'
+      allow update: if isAuthenticated() &&
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
+
+      allow create: if isAuthenticated() && (
+        // Regular user participant branch
+        (isEmailVerified() &&
+         request.resource.data.userId is string && request.resource.data.userId.size() > 0 &&
+         request.resource.data.title is string && request.resource.data.title.size() > 0 &&
+         request.resource.data.message is string && request.resource.data.message.size() > 0 &&
+         request.resource.data.isRead == false &&
+         request.resource.data.type in ['donor_accepted', 'donor_released', 'donation_confirmed', 'donation_not_completed', 'request_created', 'general'] && (
+           // Self-notification
+           (request.resource.data.userId == request.auth.uid) ||
+           // Notification linked to a valid blood request where both actor and recipient are participants
+           (request.resource.data.relatedRequestId is string &&
+            request.resource.data.relatedRequestId.size() > 0 &&
+            request.resource.data.type in ['donor_accepted', 'donor_released', 'donation_confirmed', 'donation_not_completed'] &&
+            isParticipantInRequest(request.resource.data.relatedRequestId, request.auth.uid) &&
+            isParticipantInRequest(request.resource.data.relatedRequestId, request.resource.data.userId))
+         )) ||
+        // Administrator notification branch
+        (isAdmin() &&
+         request.resource.data.userId is string && request.resource.data.userId.size() > 0 &&
+         request.resource.data.title is string && request.resource.data.title.size() > 0 &&
+         request.resource.data.message is string && request.resource.data.message.size() > 0 &&
+         request.resource.data.type in ['request_approved', 'request_rejected', 'request_republished', 'donation_verified', 'donation_rejected', 'donor_released', 'general'])
+      );
+
+      // Recipients can delete their own notifications; admins can delete any (cascade delete)
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // =========================================================
+    // COLLECTION: admin_logs
+    // Canonical schema: actorId + actorName (+ optional legacy adminId)
+    // Immutable audit record. No deletion permitted.
+    // =========================================================
+    match /admin_logs/{logId} {
+      allow read: if isAdmin();
+
+      allow create: if isAuthenticated() && (
+        // Legitimate user business actions (evaluated first)
+        (isEmailVerified() &&
+         (request.resource.data.actorId == request.auth.uid ||
+          request.resource.data.get('adminId', '') == request.auth.uid) &&
+         request.resource.data.action in [
+           'request_created', 'request_accepted', 'donor_accepted',
+           'donation_pending_verification', 'donation_not_completed',
+           'donor_released'
+         ]) ||
+        // Admin actions
+        (isAdmin() &&
+         (request.resource.data.actorId == request.auth.uid ||
+          request.resource.data.get('adminId', '') == request.auth.uid) &&
+         request.resource.data.action in [
+           'request_approved', 'request_rejected', 'request_republished',
+           'donation_verified', 'donation_rejected', 'donation_deleted',
+           'donor_released', 'donor_status_changed', 'user_account_status_changed',
+           'user_profile_updated', 'donor_profile_updated', 'user_deleted', 'donor_deleted'
+         ])
+      );
+
+      // Admins can mark alerts as read
+      allow update: if isAdmin() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
+
+      allow delete: if false; // Immutable audit log
+    }
+
+    // =========================================================
+    // COLLECTION: admin_hidden_items
+    // Admin list view preference (Hide / Unhide)
+    // Strictly scoped to the authenticated admin owner for all operations
+    // =========================================================
+    match /admin_hidden_items/{hiddenItemId} {
+      allow read: if isAdmin() && resource != null && resource.data.adminId == request.auth.uid;
+
+      allow create: if isAdmin() &&
+        request.resource.data.adminId == request.auth.uid &&
+        (request.resource.data.targetType == 'request' || request.resource.data.targetType == 'alert') &&
+        request.resource.data.targetId is string &&
+        request.resource.data.targetId.size() > 0;
+
+      allow update: if isAdmin() &&
+        resource.data.adminId == request.auth.uid &&
+        request.resource.data.adminId == request.auth.uid;
+
+      allow delete: if isAdmin() && resource.data.adminId == request.auth.uid;
+    }
+
+    // =========================================================
+    // COLLECTION: device_tokens
+    // =========================================================
+    match /device_tokens/{tokenId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // =========================================================
+    // COLLECTION: password_reset_tokens
+    // Direct client access is strictly denied. Managed by Cloud Functions backend.
+    // =========================================================
+    match /password_reset_tokens/{tokenId} {
+      allow read, write: if false;
+    }
+  }
+}
