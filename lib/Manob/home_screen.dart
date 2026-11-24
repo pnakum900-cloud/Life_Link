@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../Bokul/alerts.dart';
+import '../Bokul/blood_request_service.dart';
 import '../Bokul/profile.dart';
 import '../Bokul/request.dart';
 import '../Bokul/search.dart';
 import '../Bokul/user_nav.dart';
-// import 'register_screen.dart';
+import 'blood_request_model.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -15,41 +17,21 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   static const Color _blue = Color(0xFF0757D5);
-  int _currentIndex = 0;
-
-  final List<Map<String, String>> _recentRequests = const [
-    {
-      'bloodType': 'AB+',
-      'name': 'Pratik Nakum',
-      'hospital': 'Civil Hospital, Rajkot',
-      'time': '2h ago',
-      'status': 'Available',
-    },
-    {
-      'bloodType': 'AB+',
-      'name': 'Pratik Nakum',
-      'hospital': 'Civil Hospital, Rajkot',
-      'time': '2h ago',
-      'status': 'Available',
-    },
-    {
-      'bloodType': 'O+',
-      'name': 'Karan Patel',
-      'hospital': 'H.J. Doshi Hospital, Rajkot',
-      'time': '4h ago',
-      'status': 'Available',
-    },
-    {
-      'bloodType': 'B+',
-      'name': 'Neha Shah',
-      'hospital': 'Rajkot Cancer Hospital',
-      'time': '6h ago',
-      'status': 'Available',
-    },
-  ];
+  final int _currentIndex = 0;
 
   void _onBottomNavTap(int index) {
     goUserTab(context, 0, index);
+  }
+
+  String _formatTime(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inMinutes < 60) {
+      return '${diff.inMinutes}m ago';
+    } else if (diff.inHours < 24) {
+      return '${diff.inHours}h ago';
+    } else {
+      return DateFormat('dd MMM').format(dt);
+    }
   }
 
   @override
@@ -71,14 +53,8 @@ class _HomeScreenState extends State<HomeScreen> {
             activeIcon: Icon(Icons.home),
             label: 'Home',
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.search),
-            label: 'Search',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.add),
-            label: 'Request',
-          ),
+          BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
+          BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Request'),
           BottomNavigationBarItem(
             icon: Icon(Icons.notifications_outlined),
             label: 'Alerts',
@@ -112,7 +88,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           ),
                         ),
-                        GestureDetector(
+                        UserAvatar(
+                          size: 36,
                           onTap: () {
                             Navigator.push(
                               context,
@@ -121,20 +98,6 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             );
                           },
-                          child: Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF3F4F6),
-                              shape: BoxShape.circle,
-                              border: Border.all(color: const Color(0xFFE5E7EB)),
-                            ),
-                            child: const Icon(
-                              Icons.person_outline,
-                              color: Color(0xFF9CA3AF),
-                              size: 20,
-                            ),
-                          ),
                         ),
                       ],
                     ),
@@ -146,10 +109,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         color: _blue,
                         borderRadius: BorderRadius.circular(16),
                       ),
-                      child: Column(
+                      child: const Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
+                          Text(
                             'Donate Blood,\nSave Lives',
                             style: TextStyle(
                               color: Colors.white,
@@ -158,8 +121,8 @@ class _HomeScreenState extends State<HomeScreen> {
                               height: 1.2,
                             ),
                           ),
-                          const SizedBox(height: 10),
-                          const Text(
+                          SizedBox(height: 10),
+                          Text(
                             'Your single donation can save\nup to three lives in Rajkot.',
                             style: TextStyle(
                               color: Colors.white,
@@ -167,7 +130,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               height: 1.4,
                             ),
                           ),
-                          const SizedBox(height: 16),
+                          SizedBox(height: 16),
                         ],
                       ),
                     ),
@@ -220,7 +183,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         vertical: 12,
                       ),
                       decoration: BoxDecoration(
-                        // color: const Color(0xFFF8FAFC),
                         borderRadius: BorderRadius.circular(24),
                       ),
                       child: const Row(
@@ -228,7 +190,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           Icon(Icons.location_on, color: _blue, size: 22),
                           SizedBox(width: 6),
                           Text(
-                            'Active Requests in Rajkot',
+                            'Active Published Requests in Rajkot',
                             style: TextStyle(
                               color: Color(0xFF6B7280),
                               fontWeight: FontWeight.w500,
@@ -270,11 +232,73 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    ..._recentRequests.map(
-                      (request) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _RequestCard(request: request),
+
+                    // Live Stream of Published & Approved Blood Requests
+                    StreamBuilder<List<BloodRequestModel>>(
+                      stream: BloodRequestService.streamPublishedRequests(
+                        limit: 5,
                       ),
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState ==
+                            ConnectionState.waiting) {
+                          return const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 24),
+                            child: Center(child: CircularProgressIndicator()),
+                          );
+                        }
+
+                        final requests = snapshot.data ?? [];
+
+                        if (requests.isEmpty) {
+                          return Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 32,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF9FAFB),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: const Color(0xFFE5E7EB),
+                              ),
+                            ),
+                            child: const Column(
+                              children: [
+                                Icon(
+                                  Icons.check_circle_outline,
+                                  color: Color(0xFF10B981),
+                                  size: 40,
+                                ),
+                                SizedBox(height: 10),
+                                Text(
+                                  'No urgent blood requests in Rajkot right now.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: Color(0xFF6B7280),
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+
+                        return Column(
+                          children: requests.map((req) {
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: _RequestCard(
+                                request: req,
+                                formattedTime: _formatTime(
+                                  req.effectiveFeedTime,
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        );
+                      },
                     ),
                   ],
                 ),
@@ -319,9 +343,10 @@ class _QuickActionCard extends StatelessWidget {
 }
 
 class _RequestCard extends StatelessWidget {
-  const _RequestCard({required this.request});
+  const _RequestCard({required this.request, required this.formattedTime});
 
-  final Map<String, String> request;
+  final BloodRequestModel request;
+  final String formattedTime;
 
   @override
   Widget build(BuildContext context) {
@@ -331,80 +356,180 @@ class _RequestCard extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: const Color(0xFFE5E7EB)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: const Color(0xFFFEE2E2),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(
-              request['bloodType']!,
-              style: const TextStyle(
-                color: Color(0xFFDC2626),
-                fontWeight: FontWeight.w800,
-              ),
-            ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  request['name']!,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  request['hospital']!,
-                  style: const TextStyle(
-                    color: Color(0xFF6B7280),
-                    fontSize: 13,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Row(
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              RequesterAvatar(
+                photoUrl: request.requesterPhotoUrl,
+                name: request.requesterName,
+                size: 38,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(
-                      Icons.access_time,
-                      size: 14,
-                      color: Color(0xFF9CA3AF),
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      request['time']!,
-                      style: const TextStyle(
+                    const Text(
+                      'BLOOD REQUEST',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.5,
                         color: Color(0xFF9CA3AF),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Requested by: ${request.displayRequesterName}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF111827),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEE2E2),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  request.bloodGroup,
+                  style: const TextStyle(
+                    color: Color(0xFFDC2626),
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const Divider(height: 16, color: Color(0xFFE5E7EB)),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Patient: ${request.patientName}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                        color: Color(0xFF111827),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${request.hospitalName} • ${request.city}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF6B7280),
                         fontSize: 12,
                       ),
                     ),
                   ],
                 ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: const Color(0xFFDBEAFE),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Text(
-              request['status']!,
-              style: const TextStyle(
-                color: Color(0xFF0757D5),
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
               ),
-            ),
+              Text(
+                '${request.units} Unit(s)',
+                style: const TextStyle(
+                  color: Color(0xFF0757D5),
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFDBEAFE),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  request.urgency.toUpperCase(),
+                  style: const TextStyle(
+                    color: Color(0xFF0757D5),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              if (request.hasConfirmedDonor) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFDCFCE7),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                    'DONOR ASSIGNED',
+                    style: TextStyle(
+                      color: Color(0xFF15803D),
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+              if (request.isRepublished) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF3C7),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                    'REPUBLISHED',
+                    style: TextStyle(
+                      color: Color(0xFFB45309),
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+              const Spacer(),
+              const Icon(Icons.access_time, size: 13, color: Color(0xFF9CA3AF)),
+              const SizedBox(width: 4),
+              Text(
+                formattedTime,
+                style: const TextStyle(
+                  color: Color(0xFF9CA3AF),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
         ],
       ),

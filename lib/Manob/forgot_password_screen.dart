@@ -1,9 +1,10 @@
-
 import 'package:flutter/material.dart';
-import 'verify_otp_screen.dart';
+import 'app_validators.dart';
+import 'password_reset_service.dart';
 
 class ForgotPassword extends StatefulWidget {
-  const ForgotPassword({super.key});
+  final bool isAdmin;
+  const ForgotPassword({super.key, this.isAdmin = false});
 
   @override
   State<ForgotPassword> createState() => _ForgotPasswordState();
@@ -12,6 +13,8 @@ class ForgotPassword extends StatefulWidget {
 class _ForgotPasswordState extends State<ForgotPassword> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
+  bool _isLoading = false;
+
   static const Color _blue = Color(0xFF0757D5);
 
   @override
@@ -20,23 +23,50 @@ class _ForgotPasswordState extends State<ForgotPassword> {
     super.dispose();
   }
 
-  bool _isValidEmail(String email) {
-    return RegExp(
-      r'^[a-zA-Z0-9._%+\-]+@gmail\.com$',
-    ).hasMatch(email);
-  }
+  Future<void> _sendPasswordResetLink() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (_isLoading) return;
 
-  void _sendOtp() {
-    if (!_formKey.currentState!.validate()) {
-      return;
+    setState(() => _isLoading = true);
+
+    final email = _emailController.text.trim();
+    final result = await PasswordResetService.sendPasswordResetEmail(email);
+
+    if (!mounted) return;
+    setState(() => _isLoading = false);
+
+    if (result.success) {
+      showDialog(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text(
+              'Reset Link Sent',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+            content: Text(
+              'A password reset link has been dispatched to $email.\n\nPlease check your inbox (and spam folder) and follow the link to reset your password.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  Navigator.pop(context);
+                },
+                child: const Text('Back to Login'),
+              ),
+            ],
+          );
+        },
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.message),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
     }
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => const VerifyOTP(),
-      ),
-    );
   }
 
   @override
@@ -46,26 +76,19 @@ class _ForgotPasswordState extends State<ForgotPassword> {
       resizeToAvoidBottomInset: true,
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 24,
-            vertical: 16,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           child: Form(
             key: _formKey,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Row(
+                Row(
                   children: [
-                    Icon(
-                      Icons.water_drop,
-                      color: _blue,
-                      size: 36,
-                    ),
-                    SizedBox(width: 8),
+                    const Icon(Icons.water_drop, color: _blue, size: 36),
+                    const SizedBox(width: 8),
                     Text(
-                      'LifeLink',
-                      style: TextStyle(
+                      widget.isAdmin ? 'LifeLink Admin' : 'LifeLink',
+                      style: const TextStyle(
                         color: _blue,
                         fontSize: 26,
                         fontWeight: FontWeight.w800,
@@ -76,9 +99,11 @@ class _ForgotPasswordState extends State<ForgotPassword> {
 
                 const SizedBox(height: 56),
 
-                const Text(
-                  'Forgot Password?',
-                  style: TextStyle(
+                Text(
+                  widget.isAdmin
+                      ? 'Admin Password Recovery'
+                      : 'Forgot Password?',
+                  style: const TextStyle(
                     fontSize: 28,
                     fontWeight: FontWeight.w800,
                     color: Color(0xFF111827),
@@ -88,7 +113,7 @@ class _ForgotPasswordState extends State<ForgotPassword> {
                 const SizedBox(height: 10),
 
                 const Text(
-                  "Enter your email to receive an OTP. We'll help you\nget back into your account securely.",
+                  "Enter your registered email (@gmail.com or @rku.ac.in) to receive a secure password reset link directly to your inbox.",
                   style: TextStyle(
                     fontSize: 14,
                     height: 1.45,
@@ -113,19 +138,10 @@ class _ForgotPasswordState extends State<ForgotPassword> {
                 TextFormField(
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Email is required';
-                    }
-
-                    if (!_isValidEmail(value.trim())) {
-                      return 'Enter a valid @gmail.com email';
-                    }
-
-                    return null;
-                  },
+                  validator: (value) =>
+                      AppValidators.validateEmail(value, fieldLabel: 'Email'),
                   decoration: InputDecoration(
-                    hintText: 'ENTER EMAIL',
+                    hintText: 'ENTER EMAIL (@gmail.com or @rku.ac.in)',
                     hintStyle: const TextStyle(
                       color: Color(0xFF9CA3AF),
                       fontSize: 13,
@@ -139,27 +155,19 @@ class _ForgotPasswordState extends State<ForgotPassword> {
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(
-                        color: Color(0xFFE5E7EB),
-                      ),
+                      borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(
-                        color: _blue,
-                      ),
+                      borderSide: const BorderSide(color: _blue),
                     ),
                     errorBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(
-                        color: Colors.redAccent,
-                      ),
+                      borderSide: const BorderSide(color: Colors.redAccent),
                     ),
                     focusedErrorBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(
-                        color: Colors.redAccent,
-                      ),
+                      borderSide: const BorderSide(color: Colors.redAccent),
                     ),
                   ),
                 ),
@@ -170,7 +178,7 @@ class _ForgotPasswordState extends State<ForgotPassword> {
                   width: double.infinity,
                   height: 50,
                   child: ElevatedButton(
-                    onPressed: _sendOtp,
+                    onPressed: _isLoading ? null : _sendPasswordResetLink,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _blue,
                       foregroundColor: Colors.white,
@@ -179,13 +187,22 @@ class _ForgotPasswordState extends State<ForgotPassword> {
                         borderRadius: BorderRadius.circular(10),
                       ),
                     ),
-                    child: const Text(
-                      'SEND OTP  →',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.6,
-                      ),
-                    ),
+                    child: _isLoading
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text(
+                            'SEND RESET LINK  →',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.6,
+                            ),
+                          ),
                   ),
                 ),
 
@@ -194,9 +211,11 @@ class _ForgotPasswordState extends State<ForgotPassword> {
                 Center(
                   child: TextButton(
                     onPressed: () => Navigator.pop(context),
-                    child: const Text(
-                      '←  Back to Login',
-                      style: TextStyle(
+                    child: Text(
+                      widget.isAdmin
+                          ? '←  Back to Admin Login'
+                          : '←  Back to Login',
+                      style: const TextStyle(
                         color: _blue,
                         fontWeight: FontWeight.w600,
                       ),
