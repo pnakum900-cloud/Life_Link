@@ -1,6 +1,8 @@
-
 import 'package:flutter/material.dart';
-// import 'donor_profile.dart';
+import '../Manob/auth_service.dart';
+import 'donor_model.dart';
+import 'donor_profile.dart';
+import 'donor_service.dart';
 import 'user_nav.dart';
 
 class Search extends StatefulWidget {
@@ -11,53 +13,19 @@ class Search extends StatefulWidget {
 }
 
 class _SearchState extends State<Search> {
-  final _locationController = TextEditingController(
-    text: '150 Feet Ring Road',
-  );
+  final _locationController = TextEditingController();
+  String _selectedBloodGroup = 'All';
 
-  final List<Map<String, String>> _donors = const [
-    {
-      'name': 'Pratik Nakum',
-      'address': '150 Feet Ring Road, Rajkot',
-      'status': 'AVAILABLE',
-      'mobile': '9876543210',
-    },
-    {
-      'name': 'Pratik Nakum',
-      'address': '150 Feet Ring Road, Rajkot',
-      'status': 'AVAILABLE',
-      'mobile': '9876543211',
-    },
-    {
-      'name': 'Pratik Nakum',
-      'address': '150 Feet Ring Road, Rajkot',
-      'status': 'AVAILABLE',
-      'mobile': '9876543212',
-    },
-    {
-      'name': 'Pratik Nakum',
-      'address': '150 Feet Ring Road, Rajkot',
-      'status': 'AVAILABLE',
-      'mobile': '9876543213',
-    },
-    {
-      'name': 'Bokul Bormon',
-      'address': '150 Feet Ring Road, Rajkot',
-      'status': 'AVAILABLE',
-      'mobile': '9876543214',
-    },
-    {
-      'name': 'Karan Patel',
-      'address': 'Kalawad Road, Rajkot',
-      'status': 'AVAILABLE',
-      'mobile': '9876543215',
-    },
-    {
-      'name': 'Neha Shah',
-      'address': 'University Road, Rajkot',
-      'status': 'AVAILABLE',
-      'mobile': '9876543216',
-    },
+  static const List<String> _bloodGroups = [
+    'All',
+    'A+',
+    'A-',
+    'B+',
+    'B-',
+    'AB+',
+    'AB-',
+    'O+',
+    'O-',
   ];
 
   @override
@@ -66,28 +34,17 @@ class _SearchState extends State<Search> {
     super.dispose();
   }
 
-  List<Map<String, String>> get _filteredDonors {
-    final query = _locationController.text.trim().toLowerCase();
+  void _showDonorDetails(DonorModel donor) {
+    final currentUid = AuthService.currentFirebaseUser?.uid;
+    final isPrivileged = currentUid != null && currentUid == donor.userId;
 
-    if (query.isEmpty) return _donors;
-
-    return _donors.where((donor) {
-      return donor['name']!.toLowerCase().contains(query) ||
-          donor['address']!.toLowerCase().contains(query);
-    }).toList();
-  }
-
-  void _showDonorDetails(Map<String, String> donor) {
     showDialog(
       context: context,
       builder: (context) {
         return AlertDialog(
           title: const Text(
             'Donor Details',
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              color: kUserDark,
-            ),
+            style: TextStyle(fontWeight: FontWeight.w700, color: kUserDark),
           ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -103,16 +60,16 @@ class _SearchState extends State<Search> {
               ),
               const SizedBox(height: 4),
               Text(
-                donor['name']!,
+                donor.fullName,
                 style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
                   color: kUserDark,
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               const Text(
-                'Mobile Number',
+                'Blood Group',
                 style: TextStyle(
                   fontSize: 13,
                   color: kUserMuted,
@@ -121,26 +78,57 @@ class _SearchState extends State<Search> {
               ),
               const SizedBox(height: 4),
               Text(
-                donor['mobile']!,
+                donor.bloodGroup,
                 style: const TextStyle(
                   fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: kUserDark,
+                  fontWeight: FontWeight.w700,
+                  color: kUserBlue,
                 ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Contact Number',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: kUserMuted,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                isPrivileged
+                    ? (donor.phoneNumber.isNotEmpty
+                          ? donor.phoneNumber
+                          : 'Not provided')
+                    : 'Protected (shared upon request acceptance)',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: isPrivileged ? kUserDark : kUserMuted,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Location',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: kUserMuted,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                isPrivileged ? '${donor.address}, ${donor.city}' : donor.city,
+                style: const TextStyle(fontSize: 14, color: kUserDark),
               ),
             ],
           ),
           actions: [
             TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-              },
+              onPressed: () => Navigator.pop(context),
               child: const Text(
                 'CLOSE',
-                style: TextStyle(
-                  color: kUserBlue,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: TextStyle(color: kUserBlue, fontWeight: FontWeight.w600),
               ),
             ),
           ],
@@ -151,8 +139,6 @@ class _SearchState extends State<Search> {
 
   @override
   Widget build(BuildContext context) {
-    final donors = _filteredDonors;
-
     return Scaffold(
       backgroundColor: Colors.white,
       resizeToAvoidBottomInset: true,
@@ -166,59 +152,147 @@ class _SearchState extends State<Search> {
               child: LifeLinkHeader(),
             ),
             Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 8,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
               child: TextField(
                 controller: _locationController,
                 onChanged: (_) => setState(() {}),
-                decoration: userFieldDecoration(
-                  '150 Feet Ring Road',
-                ).copyWith(
-                  prefixIcon: const Icon(
-                    Icons.location_on_outlined,
-                    color: kUserBlue,
-                  ),
-                ),
+                decoration:
+                    userFieldDecoration(
+                      'Search by location (e.g. 150 Feet Ring Road)...',
+                    ).copyWith(
+                      prefixIcon: const Icon(
+                        Icons.location_on_outlined,
+                        color: kUserBlue,
+                      ),
+                    ),
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
-              child: Text(
-                '${donors.length} Donors found in Rajkot',
-                style: const TextStyle(
-                  color: kUserMuted,
-                  fontSize: 13,
-                ),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+              child: Row(
+                children: _bloodGroups.map((group) {
+                  final isSelected = _selectedBloodGroup == group;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(group),
+                      selected: isSelected,
+                      onSelected: (_) {
+                        setState(() {
+                          _selectedBloodGroup = group;
+                        });
+                      },
+                      selectedColor: const Color(0xFFDBEAFE),
+                      labelStyle: TextStyle(
+                        color: isSelected ? kUserBlue : kUserDark,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      backgroundColor: Colors.white,
+                      side: BorderSide(
+                        color: isSelected ? kUserBlue : kUserBorder,
+                      ),
+                    ),
+                  );
+                }).toList(),
               ),
             ),
             Expanded(
-              child: donors.isEmpty
-                  ? const Center(
-                      child: Text('No donors found'),
-                    )
-                  : ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(
-                        20,
-                        4,
-                        20,
-                        20,
-                      ),
-                      itemCount: donors.length,
-                      separatorBuilder: (_, __) =>
-                          const SizedBox(height: 12),
-                      itemBuilder: (context, index) {
-                        final donor = donors[index];
+              child: StreamBuilder<List<DonorModel>>(
+                stream: DonorService.streamDonors(
+                  bloodGroup: _selectedBloodGroup == 'All'
+                      ? null
+                      : _selectedBloodGroup,
+                ),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
 
-                        return _DonorCard(
-                          donor: donor,
-                          onOpen: () {
-                            _showDonorDetails(donor);
-                          },
-                        );
-                      },
-                    ),
+                  final allDonors = snapshot.data ?? [];
+                  final query = _locationController.text.trim().toLowerCase();
+
+                  final donors = allDonors.where((donor) {
+                    final matchesQuery =
+                        query.isEmpty ||
+                        donor.fullName.toLowerCase().contains(query) ||
+                        donor.address.toLowerCase().contains(query) ||
+                        donor.city.toLowerCase().contains(query) ||
+                        donor.bloodGroup.toLowerCase().contains(query);
+                    return matchesQuery;
+                  }).toList();
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(24, 8, 24, 8),
+                        child: Text(
+                          '${donors.length} Donors found in Rajkot',
+                          style: const TextStyle(
+                            color: kUserMuted,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: donors.isEmpty
+                            ? Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Icon(
+                                      Icons.search_off_outlined,
+                                      size: 48,
+                                      color: kUserHint,
+                                    ),
+                                    const SizedBox(height: 12),
+                                    const Text(
+                                      'No donors found matching criteria.',
+                                      style: TextStyle(
+                                        color: kUserMuted,
+                                        fontSize: 15,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : ListView.separated(
+                                padding: const EdgeInsets.fromLTRB(
+                                  20,
+                                  4,
+                                  20,
+                                  20,
+                                ),
+                                itemCount: donors.length,
+                                separatorBuilder: (_, _) =>
+                                    const SizedBox(height: 12),
+                                itemBuilder: (context, index) {
+                                  final donor = donors[index];
+                                  return _DonorCard(
+                                    donor: donor,
+                                    onOpen: () => _showDonorDetails(donor),
+                                    onViewProfile: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) => DonorProfile(
+                                            userId: donor.userId,
+                                            name: donor.fullName,
+                                            address: donor.address,
+                                            bloodGroup: donor.bloodGroup,
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  );
+                },
+              ),
             ),
           ],
         ),
@@ -231,10 +305,12 @@ class _DonorCard extends StatelessWidget {
   const _DonorCard({
     required this.donor,
     required this.onOpen,
+    required this.onViewProfile,
   });
 
-  final Map<String, String> donor;
+  final DonorModel donor;
   final VoidCallback onOpen;
+  final VoidCallback onViewProfile;
 
   @override
   Widget build(BuildContext context) {
@@ -253,18 +329,11 @@ class _DonorCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Container(
-                  width: 46,
-                  height: 46,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFF3F4F6),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                              Icons.person_outline,
-                              color: Color(0xFF9CA3AF),
-                              size: 20,
-                            ),
+                RequesterAvatar(
+                  userId: donor.userId,
+                  photoUrl: donor.profileImageUrl,
+                  name: donor.fullName,
+                  size: 44,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -272,7 +341,7 @@ class _DonorCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        donor['name']!,
+                        donor.fullName,
                         style: const TextStyle(
                           fontWeight: FontWeight.w700,
                           fontSize: 15,
@@ -281,13 +350,30 @@ class _DonorCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        donor['address']!,
-                        style: const TextStyle(
-                          color: kUserMuted,
-                          fontSize: 13,
-                        ),
+                        donor.city,
+                        style: const TextStyle(color: kUserMuted, fontSize: 13),
                       ),
                     ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF6FF),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFDBEAFE)),
+                  ),
+                  child: Text(
+                    donor.bloodGroup,
+                    style: const TextStyle(
+                      color: kUserBlue,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                    ),
                   ),
                 ),
               ],
@@ -301,27 +387,26 @@ class _DonorCard extends StatelessWidget {
                     vertical: 6,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFBBF7D0),
+                    color: donor.isAvailable
+                        ? const Color(0xFFBBF7D0)
+                        : const Color(0xFFF3F4F6),
                     borderRadius: BorderRadius.circular(16),
                   ),
-                  child: const Text(
-                    'AVAILABLE',
+                  child: Text(
+                    donor.isAvailable ? 'AVAILABLE' : 'UNAVAILABLE',
                     style: TextStyle(
-                      color: Color(0xFF15803D),
+                      color: donor.isAvailable
+                          ? const Color(0xFF15803D)
+                          : const Color(0xFF6B7280),
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
                 const Spacer(),
-
-                // Only arrow button remains
                 IconButton(
-                  onPressed: onOpen,
-                  icon: const Icon(
-                    Icons.arrow_forward,
-                    color: kUserBlue,
-                  ),
+                  onPressed: onViewProfile,
+                  icon: const Icon(Icons.arrow_forward, color: kUserBlue),
                 ),
               ],
             ),

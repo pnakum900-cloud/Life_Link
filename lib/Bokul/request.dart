@@ -1,7 +1,10 @@
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../Manob/app_validators.dart';
+import '../Manob/auth_service.dart';
+import 'blood_request_service.dart';
 import 'user_nav.dart';
+import 'user_service.dart';
 
 class Request extends StatefulWidget {
   const Request({super.key});
@@ -14,22 +17,23 @@ class _RequestState extends State<Request> {
   final _formKey = GlobalKey<FormState>();
   final _patientController = TextEditingController();
   final _hospitalController = TextEditingController();
-  final _unitController = TextEditingController(text: '7');
+  final _unitController = TextEditingController(text: '1');
   final _contactController = TextEditingController();
 
   String _bloodGroup = 'AB+';
   String _urgency = 'Normal';
+  bool _isLoading = false;
 
   static const _bloodOptions = [
-  'A+',
-  'A-',
-  'B+',
-  'B-',
-  'AB+',
-  'AB-',
-  'O+',
-  'O-',
-];
+    'A+',
+    'A-',
+    'B+',
+    'B-',
+    'AB+',
+    'AB-',
+    'O+',
+    'O-',
+  ];
   static const _urgencyOptions = ['Normal', 'Urgent', 'Critical'];
 
   @override
@@ -41,10 +45,8 @@ class _RequestState extends State<Request> {
     super.dispose();
   }
 
-  void _submit() {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
 
     if (_bloodGroup.isEmpty) {
       _showMessage('Please select a blood group');
@@ -56,16 +58,66 @@ class _RequestState extends State<Request> {
       return;
     }
 
-    _showMessage('Blood request submitted successfully');
+    if (_isLoading) return;
+    setState(() => _isLoading = true);
 
-    _patientController.clear();
-    _hospitalController.clear();
-    _contactController.clear();
+    final currentUser = AuthService.currentFirebaseUser;
+    if (currentUser == null) {
+      if (mounted) setState(() => _isLoading = false);
+      _showMessage('Please log in before submitting a blood request.');
+      return;
+    }
+
+    final requesterId = currentUser.uid;
+
+    // Resolve requester's name & picture safely from authenticated user profile
+    final userProfile = await UserService.getUser(requesterId);
+    final requesterName = (userProfile?.fullName.isNotEmpty == true)
+        ? userProfile!.fullName
+        : (currentUser.displayName?.isNotEmpty == true
+              ? currentUser.displayName!
+              : 'LifeLink Member');
+    final requesterPhoto = userProfile?.profileImageUrl ?? currentUser.photoURL;
+
+    final units = num.tryParse(_unitController.text.trim()) ?? 1;
+
+    final requestId = await BloodRequestService.createRequest(
+      requesterId: requesterId,
+      requesterName: requesterName,
+      requesterPhotoUrl: requesterPhoto,
+      patientName: _patientController.text.trim(),
+      bloodGroup: _bloodGroup,
+      units: units,
+      hospitalName: _hospitalController.text.trim(),
+      contactNumber: _contactController.text.trim(),
+      urgency: _urgency,
+      createdByRole: 'user',
+    );
+
+    if (!mounted) return;
+    setState(() => _isLoading = false);
+
+    if (requestId != null) {
+      _showMessage(
+        'Blood request submitted successfully! It is now pending admin approval.',
+        isSuccess: true,
+      );
+
+      _patientController.clear();
+      _hospitalController.clear();
+      _contactController.clear();
+      _unitController.text = '1';
+    } else {
+      _showMessage('Failed to submit request. Please try again.');
+    }
   }
 
-  void _showMessage(String message) {
+  void _showMessage(String message, {bool isSuccess = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isSuccess ? Colors.green : Colors.redAccent,
+      ),
     );
   }
 
@@ -98,38 +150,20 @@ class _RequestState extends State<Request> {
                 const SizedBox(height: 8),
 
                 const Text(
-                  'Fill the details below to broadcast an urgent blood\nrequest to nearby donors.',
-                  style: TextStyle(
-                    color: kUserMuted,
-                    height: 1.4,
-                  ),
+                  'Fill the details below to broadcast an urgent blood\nrequest to nearby donors in Rajkot.',
+                  style: TextStyle(color: kUserMuted, height: 1.4),
                 ),
 
                 const SizedBox(height: 24),
 
-                const Text(
-                  'Patient Name',
-                  style: TextStyle(color: kUserMuted),
-                ),
+                const Text('Patient Name', style: TextStyle(color: kUserMuted)),
 
                 const SizedBox(height: 8),
 
                 TextFormField(
                   controller: _patientController,
-                  decoration: userFieldDecoration(
-                    'ENTER PATIENT NAME',
-                  ),
-                  validator: (value) {
-                     if (value == null || value.trim().isEmpty) {
-                        return 'Patient name is required';
-                      }
-
-                      if (!RegExp(r'^[a-zA-Z ]+$').hasMatch(value.trim())) {
-                        return 'Name can contain only characters';
-                      }
-
-                      return null;
-                  },
+                  decoration: userFieldDecoration('ENTER PATIENT NAME'),
+                  validator: AppValidators.validatePatientName,
                 ),
 
                 const SizedBox(height: 18),
@@ -143,12 +177,8 @@ class _RequestState extends State<Request> {
 
                 FormField<String>(
                   initialValue: _bloodGroup,
-                  validator: (value) {
-                    if (_bloodGroup.isEmpty) {
-                      return 'Blood group is required';
-                    }
-                    return null;
-                  },
+                  validator: (value) =>
+                      AppValidators.validateBloodGroup(_bloodGroup),
                   builder: (field) {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -170,16 +200,12 @@ class _RequestState extends State<Request> {
                               },
                               selectedColor: const Color(0xFFDBEAFE),
                               labelStyle: TextStyle(
-                                color: selected
-                                    ? kUserBlue
-                                    : kUserDark,
+                                color: selected ? kUserBlue : kUserDark,
                                 fontWeight: FontWeight.w600,
                               ),
                               backgroundColor: Colors.white,
                               side: BorderSide(
-                                color: selected
-                                    ? kUserBlue
-                                    : kUserBorder,
+                                color: selected ? kUserBlue : kUserBorder,
                               ),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(20),
@@ -189,10 +215,7 @@ class _RequestState extends State<Request> {
                         ),
                         if (field.hasError)
                           Padding(
-                            padding: const EdgeInsets.only(
-                              top: 8,
-                              left: 12,
-                            ),
+                            padding: const EdgeInsets.only(top: 8, left: 12),
                             child: Text(
                               field.errorText!,
                               style: const TextStyle(
@@ -208,29 +231,20 @@ class _RequestState extends State<Request> {
 
                 const SizedBox(height: 18),
 
-                const Text(
-                  'Hospital',
-                  style: TextStyle(color: kUserMuted),
-                ),
+                const Text('Hospital', style: TextStyle(color: kUserMuted)),
 
                 const SizedBox(height: 8),
 
                 TextFormField(
                   controller: _hospitalController,
                   decoration: userFieldDecoration(
-                    'ENTER HOSPITAL NAME',
+                    'ENTER HOSPITAL NAME (e.g. Civil Hospital)',
                   ),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) {
-                      return 'Hospital name is required';
-                    }
-
-                    if (!RegExp(r'^[a-zA-Z ]+$').hasMatch(value.trim())) {
-                      return 'Hospital name can contain only characters';
-                    }
-
-                    return null;
-                  },
+                  validator: (value) => AppValidators.validateAddressOrText(
+                    value,
+                    fieldName: 'Hospital name',
+                    minLength: 3,
+                  ),
                 ),
 
                 const SizedBox(height: 18),
@@ -244,34 +258,28 @@ class _RequestState extends State<Request> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const Text(
-                            'Unit (1U-500ML)',
+                            'Unit (1U-450ML)',
                             style: TextStyle(color: kUserMuted),
                           ),
-
                           const SizedBox(height: 8),
-
                           TextFormField(
                             controller: _unitController,
                             keyboardType: TextInputType.number,
                             inputFormatters: [
                               FilteringTextInputFormatter.digitsOnly,
-                              LengthLimitingTextInputFormatter(4),
+                              LengthLimitingTextInputFormatter(2),
                             ],
-                            decoration: userFieldDecoration('7'),
-                            validator: (value) {
-                              if (value == null ||
-                                  value.trim().isEmpty) {
-                                return 'Unit is required';
-                              }
-                              return null;
-                            },
+                            decoration: userFieldDecoration('1'),
+                            validator: (value) => AppValidators.validateUnits(
+                              value,
+                              min: 1,
+                              max: 10,
+                            ),
                           ),
                         ],
                       ),
                     ),
-
                     const SizedBox(width: 12),
-
                     Expanded(
                       flex: 4,
                       child: Column(
@@ -281,9 +289,7 @@ class _RequestState extends State<Request> {
                             'Contact Number',
                             style: TextStyle(color: kUserMuted),
                           ),
-
                           const SizedBox(height: 8),
-
                           TextFormField(
                             controller: _contactController,
                             keyboardType: TextInputType.phone,
@@ -294,18 +300,7 @@ class _RequestState extends State<Request> {
                             decoration: userFieldDecoration(
                               'ENTER CONTACT NUMBER',
                             ),
-                            validator: (value) {
-                              if (value == null ||
-                                  value.trim().isEmpty) {
-                                return 'Contact number is required';
-                              }
-
-                              if (value.length != 10) {
-                                return 'Enter a valid 10 digit number';
-                              }
-
-                              return null;
-                            },
+                            validator: AppValidators.validateIndianPhone,
                           ),
                         ],
                       ),
@@ -341,10 +336,7 @@ class _RequestState extends State<Request> {
                             return Expanded(
                               child: Padding(
                                 padding: EdgeInsets.only(
-                                  right: level ==
-                                          _urgencyOptions.last
-                                      ? 0
-                                      : 8,
+                                  right: level == _urgencyOptions.last ? 0 : 8,
                                 ),
                                 child: OutlinedButton(
                                   onPressed: () {
@@ -361,13 +353,10 @@ class _RequestState extends State<Request> {
                                         ? kUserBlue
                                         : kUserDark,
                                     side: BorderSide(
-                                      color: selected
-                                          ? kUserBlue
-                                          : kUserBorder,
+                                      color: selected ? kUserBlue : kUserBorder,
                                     ),
                                     shape: RoundedRectangleBorder(
-                                      borderRadius:
-                                          BorderRadius.circular(10),
+                                      borderRadius: BorderRadius.circular(10),
                                     ),
                                   ),
                                   child: Text(level),
@@ -378,10 +367,7 @@ class _RequestState extends State<Request> {
                         ),
                         if (field.hasError)
                           Padding(
-                            padding: const EdgeInsets.only(
-                              top: 8,
-                              left: 12,
-                            ),
+                            padding: const EdgeInsets.only(top: 8, left: 12),
                             child: Text(
                               field.errorText!,
                               style: const TextStyle(
@@ -401,7 +387,7 @@ class _RequestState extends State<Request> {
                   width: double.infinity,
                   height: 50,
                   child: ElevatedButton(
-                    onPressed: _submit,
+                    onPressed: _isLoading ? null : _submit,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: kUserBlue,
                       foregroundColor: Colors.white,
@@ -410,12 +396,19 @@ class _RequestState extends State<Request> {
                         borderRadius: BorderRadius.circular(10),
                       ),
                     ),
-                    child: const Text(
-                      'SUBMIT REQUEST',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
+                    child: _isLoading
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text(
+                            'SUBMIT REQUEST',
+                            style: TextStyle(fontWeight: FontWeight.w700),
+                          ),
                   ),
                 ),
               ],
