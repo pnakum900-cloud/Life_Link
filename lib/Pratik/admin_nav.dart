@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../Manob/auth_service.dart';
 import 'admin_login.dart';
 import 'admin_theme.dart';
 
@@ -11,13 +12,7 @@ class AdminRoutes {
   static const alerts = '/system-alerts';
   static const users = '/manage-users';
 
-  static const List<String> tabs = [
-    dashboard,
-    donors,
-    requests,
-    alerts,
-    users,
-  ];
+  static const List<String> tabs = [dashboard, donors, requests, alerts, users];
 }
 
 /// Bottom-tab and logout navigation for the Admin Panel.
@@ -35,7 +30,7 @@ class AdminNav {
   }
 
   static void logout(BuildContext context) {
-    // TODO: Replace this with real logout logic later
+    AuthService.logout();
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (context) => const AdminLogin()),
@@ -71,10 +66,7 @@ class AdminBottomBar extends StatelessWidget {
           activeIcon: Icon(Icons.home),
           label: 'Home',
         ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.search),
-          label: 'Search',
-        ),
+        BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
         BottomNavigationBarItem(
           icon: Icon(Icons.add),
           activeIcon: Icon(Icons.add),

@@ -1,7 +1,8 @@
-
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
+import '../Manob/app_validators.dart';
+import '../Manob/auth_service.dart';
+import '../Manob/forgot_password_screen.dart';
 import '../Manob/login_screen.dart';
 import 'admin_nav.dart';
 
@@ -19,6 +20,7 @@ class _AdminLoginState extends State<AdminLogin> {
   final _passwordController = TextEditingController();
 
   bool _obscurePassword = true;
+  bool _isLoading = false;
 
   static const _fieldRadius = 8.0;
   static const _borderColor = Color(0xFFD1D5DB);
@@ -33,66 +35,37 @@ class _AdminLoginState extends State<AdminLogin> {
     super.dispose();
   }
 
-  bool _isValidEmailFormat(String email) {
-    final regex = RegExp(
-      r'^[a-zA-Z0-9._%+\-]+@gmail\.com$',
+  Future<void> _handleLogin() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (_isLoading) return;
+
+    setState(() => _isLoading = true);
+
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+
+    final result = await AuthService.login(
+      email: email,
+      password: password,
+      requireAdminRole: true,
     );
 
-    return regex.hasMatch(email);
+    if (!mounted) return;
+    setState(() => _isLoading = false);
+
+    if (result.success) {
+      Navigator.pushReplacementNamed(context, AdminRoutes.dashboard);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.message ?? 'Invalid Admin ID or Password'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
   }
 
-  String? _validateEmail(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Admin ID is required';
-    }
-
-    final email = value.trim();
-
-    if (email.length > 30) {
-      return 'Admin ID cannot exceed 30 characters';
-    }
-
-    if (!_isValidEmailFormat(email)) {
-      return 'Enter a valid @gmail.com email address';
-    }
-
-    return null;
-  }
-
-  String? _validatePassword(String? value) {
-    if (value == null || value.isEmpty) {
-      return 'Password is required';
-    }
-
-    if (value.length > 15) {
-      return 'Password cannot exceed 15 characters';
-    }
-
-    if (!RegExp(r'[A-Z]').hasMatch(value)) {
-      return 'Password must contain an uppercase letter';
-    }
-
-    if (!RegExp(r'[a-z]').hasMatch(value)) {
-      return 'Password must contain a lowercase letter';
-    }
-
-    if (!RegExp(r'[0-9]').hasMatch(value)) {
-      return 'Password must contain a number';
-    }
-
-    if (!RegExp(
-      r'[!@#$%^&*(),.?":{}|<>_\-\\/\[\]+=]',
-    ).hasMatch(value)) {
-      return 'Password must contain a special character';
-    }
-
-    return null;
-  }
-
-  InputDecoration _fieldDecoration({
-    required String hint,
-    Widget? suffixIcon,
-  }) {
+  InputDecoration _fieldDecoration({required String hint, Widget? suffixIcon}) {
     return InputDecoration(
       hintText: hint,
       hintStyle: const TextStyle(
@@ -104,33 +77,22 @@ class _AdminLoginState extends State<AdminLogin> {
       filled: true,
       fillColor: Colors.white,
       counterText: '',
-      contentPadding: const EdgeInsets.symmetric(
-        horizontal: 16,
-        vertical: 14,
-      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(_fieldRadius),
-        borderSide: const BorderSide(
-          color: _borderColor,
-        ),
+        borderSide: const BorderSide(color: _borderColor),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(_fieldRadius),
-        borderSide: const BorderSide(
-          color: _loginBlue,
-        ),
+        borderSide: const BorderSide(color: _loginBlue),
       ),
       errorBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(_fieldRadius),
-        borderSide: const BorderSide(
-          color: Colors.redAccent,
-        ),
+        borderSide: const BorderSide(color: Colors.redAccent),
       ),
       focusedErrorBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(_fieldRadius),
-        borderSide: const BorderSide(
-          color: Colors.redAccent,
-        ),
+        borderSide: const BorderSide(color: Colors.redAccent),
       ),
     );
   }
@@ -146,13 +108,11 @@ class _AdminLoginState extends State<AdminLogin> {
             return SingleChildScrollView(
               padding: const EdgeInsets.symmetric(horizontal: 28),
               child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  minHeight: constraints.maxHeight,
-                ),
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const SizedBox(height: 40),
+                    const SizedBox(height: 32),
 
                     Form(
                       key: _formKey,
@@ -179,7 +139,7 @@ class _AdminLoginState extends State<AdminLogin> {
                             ),
                           ),
 
-                          const SizedBox(height: 44),
+                          const SizedBox(height: 36),
 
                           const Align(
                             alignment: Alignment.centerLeft,
@@ -199,17 +159,17 @@ class _AdminLoginState extends State<AdminLogin> {
                             controller: _emailController,
                             keyboardType: TextInputType.emailAddress,
                             textInputAction: TextInputAction.next,
-                            maxLength: 30,
-                            inputFormatters: [
-                              LengthLimitingTextInputFormatter(30),
-                            ],
-                            validator: _validateEmail,
+                            validator: (value) => AppValidators.validateEmail(
+                              value,
+                              fieldLabel: 'Admin ID',
+                            ),
                             decoration: _fieldDecoration(
-                              hint: 'ENTER YOUR MAIL ID',
+                              hint:
+                                  'ENTER YOUR EMAIL (@gmail.com or @rku.ac.in)',
                             ),
                           ),
 
-                          const SizedBox(height: 22),
+                          const SizedBox(height: 20),
 
                           const Align(
                             alignment: Alignment.centerLeft,
@@ -229,18 +189,18 @@ class _AdminLoginState extends State<AdminLogin> {
                             controller: _passwordController,
                             obscureText: _obscurePassword,
                             textInputAction: TextInputAction.done,
-                            maxLength: 15,
-                            inputFormatters: [
-                              LengthLimitingTextInputFormatter(15),
-                            ],
-                            validator: _validatePassword,
+                            onFieldSubmitted: (_) => _handleLogin(),
+                            validator: (value) =>
+                                AppValidators.validatePassword(
+                                  value,
+                                  isNewPassword: false,
+                                ),
                             decoration: _fieldDecoration(
                               hint: 'ENTER PASSWORD',
                               suffixIcon: IconButton(
                                 onPressed: () {
                                   setState(() {
-                                    _obscurePassword =
-                                        !_obscurePassword;
+                                    _obscurePassword = !_obscurePassword;
                                   });
                                 },
                                 icon: Icon(
@@ -253,36 +213,38 @@ class _AdminLoginState extends State<AdminLogin> {
                             ),
                           ),
 
-                          const SizedBox(height: 36),
+                          const SizedBox(height: 12),
+
+                          // Working "Forgot Password?" option on Admin Login
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const ForgotPassword(isAdmin: true),
+                                  ),
+                                );
+                              },
+                              child: const Text(
+                                'Forgot Password?',
+                                style: TextStyle(
+                                  color: _loginBlue,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          const SizedBox(height: 20),
 
                           SizedBox(
                             width: double.infinity,
                             height: 48,
                             child: ElevatedButton(
-                              onPressed: () {
-                                if (_formKey.currentState!.validate()) {
-                                  if (_emailController.text.trim() ==
-                                          'pratik@gmail.com' &&
-                                      _passwordController.text ==
-                                          'Pratik@123') {
-                                    // ADMIN LOGIN SUCCESS
-                                    // Keep the navigation code easy to replace later.
-                                    Navigator.pushReplacementNamed(
-                                      context,
-                                      AdminRoutes.dashboard,
-                                    );
-                                  } else {
-                                    ScaffoldMessenger.of(context)
-                                        .showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'Invalid Admin ID or Password',
-                                        ),
-                                      ),
-                                    );
-                                  }
-                                }
-                              },
+                              onPressed: _isLoading ? null : _handleLogin,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: _loginBlue,
                                 foregroundColor: Colors.white,
@@ -293,14 +255,23 @@ class _AdminLoginState extends State<AdminLogin> {
                                   ),
                                 ),
                               ),
-                              child: const Text(
-                                'LOGIN',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 0.8,
-                                ),
-                              ),
+                              child: _isLoading
+                                  ? const SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : const Text(
+                                      'LOGIN',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w700,
+                                        letterSpacing: 0.8,
+                                      ),
+                                    ),
                             ),
                           ),
                         ],
@@ -308,10 +279,7 @@ class _AdminLoginState extends State<AdminLogin> {
                     ),
 
                     Padding(
-                      padding: const EdgeInsets.only(
-                        bottom: 16,
-                        top: 24,
-                      ),
+                      padding: const EdgeInsets.only(bottom: 16, top: 24),
                       child: GestureDetector(
                         onTap: () {
                           Navigator.push(
